@@ -13,7 +13,7 @@ from stable_baselines3.common.vec_env import VecMonitor, VecVideoRecorder
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 
 from powderworld import PWSim
-from powderworld.envs import PWSandEnv, PWDestroyEnv, PWDrawEnv
+from powderworld.envs import PWSandEnv, PWDestroyEnv, PWDrawEnv, PWCreativeEnv
 
 class CustomCNN(BaseFeaturesExtractor):
     """
@@ -60,10 +60,12 @@ def train(run_name, env_name, kwargs_pcg, args):
         env_fn = PWDrawEnv
     elif env_name == 'destroy':
         env_fn = PWDestroyEnv
+    elif env_name == 'creative':
+        env_fn = PWCreativeEnv
 
     env = env_fn(test=False, kwargs_pcg=kwargs_pcg, device='cuda')
     env = VecMonitor(env)
-    env = VecVideoRecorder(env, "videos", record_video_trigger=lambda x: x % 2000 == 0, video_length=200)
+    env = VecVideoRecorder(env, "videos/powder_agent", record_video_trigger=lambda x: x % args.save_every == 0, video_length=200)
     
     policy_kwargs = dict(
         features_extractor_class=CustomCNN,
@@ -84,6 +86,7 @@ if __name__ == "__main__":
     parser.add_argument('--num_circles', type=int, default=5)
     parser.add_argument('--num_squares', type=int, default=5)
     parser.add_argument('--num_tasks', type=int, default=100000)
+    parser.add_argument('--save_every', type=int, default=2000)
     parser.add_argument('--env_name')
     
     parser.add_argument('--ppo_steps', type=int, default=64)

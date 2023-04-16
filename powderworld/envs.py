@@ -263,3 +263,70 @@ class PWDestroyEnv(PWGeneralEnv):
         im = im.resize((256, 256), Image.NEAREST)
         im = np.array(im)
         return im
+
+class PWCreativeEnv(PWGeneralEnv):
+    def __init__(self, test=False, kwargs_pcg=None, total_timesteps=200, n_world_settle=200, batch_size=32, device=None, use_jit=True):
+        super().__init__(test=test, kwargs_pcg=kwargs_pcg, total_timesteps=total_timesteps, batch_size=batch_size, device=device, use_jit=use_jit)
+        self.n_world_settle = n_world_settle
+        self.goal_state = None
+
+    def reset(self):
+        self.world = torch.zeros((self.batch_size, self.pw.NUM_CHANNEL, 64, 64), dtype=torch.float32, device=self.device)
+
+        # Procedurally generated world
+        for b in range(self.batch_size):
+            args = ['elems', 'num_tasks', 'num_lines', 'num_circles', 'num_squares']
+            powderworld.dists.make_world(self.pw, self.world[b:b+1], **{k: self.kwargs_pcg[k] for k in args})
+        
+        # Add objects and let the env settle to obtain goal state
+        self.goal_state = self.get_goal_state()
+
+        self.timestep = 0
+        return self.world.cpu().numpy()
+                    
+    def step_wait(self):
+        self.apply_action(self.world, self.actions)
+        
+        self.world = self.pw(self.world)
+        self.timestep += 1
+        ob = self.world.cpu().numpy()
+        rew = self.get_rew()
+        done = self.timestep >= self.total_timesteps
+        dones = np.array([done] * self.batch_size)
+        if done:
+            ob = self.reset()
+        info = [{}] * self.batch_size
+        return ob, rew, dones, info
+
+    # Measure the difference between the current state and the goal state
+    def get_rew(self):
+        mse = (self.world - self.goal_state) ** 2
+        mse_loss = torch.sum(mse, dim=(1,2,3)).cpu().numpy() / 10_000
+        return -mse_loss
+
+    def get_goal_state(self, elems=['empty','sand', 'water', 'wall']):
+        rand = np.random.RandomState(1337)
+        temp_world = self.world.clone()
+
+        radius = 5
+        num_squares = 5
+        for b in range(self.batch_size):
+            for s in range(rand.randint(2, num_squares+1)):
+                elem = rand.choice(elems)
+                x1 = rand.randint(64)
+                y1 = rand.randint(64)
+                self.pw.add_element(temp_world[b:b+1, :, lim(x1-radius):lim(x1+radius), lim(y1-radius):lim(y1+radius)], elem)
+
+        # Let the simulation settle before returning the goal state
+        for _ in range(self.n_world_settle):
+            temp_world = self.pw(temp_world)
+
+        return temp_world
+
+    def render(self, env_id=0, mode='rgb_array'):
+        assert mode=='rgb_array'
+        im = self.pwr.render(self.world[[env_id]])
+        im = Image.fromarray(im)
+        im = im.resize((256, 256), Image.NEAREST)
+        im = np.array(im)
+        return im
